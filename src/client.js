@@ -16,7 +16,7 @@ const TIMEOUT_PADRAO_MS = 15000;
  * O que este cliente faz de diferente de um wrapper qualquer: ele não devolve
  * lista crua. Toda listagem volta como {itens, total, completa} — porque a API
  * devolve menos do que ela mesma declara, e quem recebe um array não tem como
- * saber disso. Ver README, seção "As cinco armadilhas".
+ * saber disso. Ver README, seção "As quatro armadilhas não documentadas".
  */
 class AdvboxClient {
   /**
@@ -107,7 +107,7 @@ class AdvboxClient {
   /**
    * Normaliza uma listagem e CONFERE o total declarado pela própria API.
    *
-   * Armadilha nº 1: `GET /customers` já devolveu 377 registros declarando
+   * ARMADILHA (listagem truncada): `GET /customers` já devolveu 377 declarando
    * `totalCount: 447` no mesmo corpo. `GET /posts`, 157 declarando 169. Paginar
    * por offset não alcança o resto. Quem recebe só o array acha que tem a base
    * inteira — e uma auditoria em cima disso acusa gente que está cadastrada.
@@ -177,7 +177,7 @@ class AdvboxClient {
   /**
    * GET /movements/{lawsuitId} — andamentos de UM processo.
    *
-   * Armadilha nº 2: o caminho NÃO é `/lawsuits/{id}/movements`. Esse caminho não
+   * CUIDADO: o caminho NÃO é `/lawsuits/{id}/movements`. Esse caminho não
    * existe e a API responde 200 com lista vazia em vez de 404 — o que se lê como
    * "este processo não tem andamento". Em um caso real havia 23 movimentações do
    * tribunal num processo dado como parado.
@@ -198,7 +198,7 @@ class AdvboxClient {
   /**
    * GET /last_movements — último andamento de CADA processo, numa chamada só.
    *
-   * Armadilha nº 3: é a chamada barata, mas devolve `header` NULO em todos os
+   * ARMADILHA (campo perdido em lote): é a chamada barata, mas devolve `header` NULO em todos os
    * registros — justamente o campo que diria se o andamento veio do tribunal ou
    * foi escrito pelo seu sistema. Serve para descobrir ONDE olhar; não serve
    * para decidir a origem. Para isso, `andamentos(id)`, um processo por vez.
@@ -220,7 +220,7 @@ class AdvboxClient {
   /**
    * GET /posts — tarefas.
    *
-   * Armadilha nº 4: `created_*` e `completed_*` são listas MUTUAMENTE
+   * ARMADILHA (listas exclusivas): `created_*` e `completed_*` são MUTUAMENTE
    * EXCLUSIVAS. Tarefa concluída SAI da lista de criadas e passa a existir só na
    * de concluídas. Lendo uma só, metade do histórico some sem nenhum aviso — e o
    * que some é exatamente o trabalho que foi terminado.

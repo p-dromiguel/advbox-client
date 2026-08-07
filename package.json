@@ -1,7 +1,7 @@
 {
   "name": "advbox-client",
   "version": "0.1.0",
-  "description": "Cliente Node para a API do ADVBOX que trata as armadilhas que a documentação não conta — listagem truncada, 200 com lista vazia em caminho inexistente e filtro de origem que não filtra.",
+  "description": "Cliente Node para a API do ADVBOX que trata o comportamento não documentado — listagem que devolve menos do que declara, parâmetro aceito e ignorado, e listas de tarefa mutuamente exclusivas.",
   "main": "index.js",
   "files": [
     "index.js",

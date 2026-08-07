@@ -1,6 +1,6 @@
 # advbox-client
 
-Cliente Node para a API do [ADVBOX](https://www.advbox.com.br/), escrito em volta das armadilhas que a documentação oficial não conta.
+Cliente Node para a API do [ADVBOX](https://www.advbox.com.br/), escrito em volta do comportamento que a documentação oficial não descreve.
 
 Zero dependências. Node 18+.
 
@@ -8,13 +8,17 @@ Zero dependências. Node 18+.
 
 ## O problema
 
-Escrever um wrapper para uma API REST é trabalho de uma tarde. O que custa caro nessa API não são os endpoints — é que **ela erra em silêncio**. As respostas voltam `200`, bem formadas, e mentem.
+Escrever um wrapper para uma API REST é trabalho de uma tarde. O que custa caro nessa API é outra coisa: **o comportamento que decide se o seu dado está certo não está escrito em lugar nenhum.** As respostas voltam `200`, bem formadas, e incompletas.
 
-O caso que originou esta biblioteca: eu precisava saber se os processos de um escritório tinham andamento no tribunal. Chamei o endpoint, recebi `200` com lista vazia, e reportei que não havia andamento nenhum.
+### Como eu descobri, e o erro que foi meu
 
-O caminho que eu tinha montado — `/lawsuits/{id}/movements`, que é o formato óbvio — **não existe**. E em vez de `404`, a API responde `200` e uma lista vazia. No caminho certo havia **23 movimentações do tribunal** num único processo que eu tinha acabado de dar como parado.
+Eu precisava saber se os processos de um escritório tinham andamento no tribunal. Chamei `/lawsuits/{id}/movements` — o formato óbvio, e o que eu tinha anotado num resumo interno das rotas. Recebi `200` com lista vazia e reportei que não havia andamento nenhum.
 
-Nenhuma das cinco armadilhas abaixo aparece na documentação oficial. Todas foram medidas contra a API real.
+Esse caminho não existe, e a API responde `200` em vez de `404`. No caminho certo havia **23 movimentações do tribunal** num processo que eu tinha acabado de dar como parado.
+
+**O caminho certo — `GET /movements/{lawsuit_id}` — está na documentação oficial.** Se eu tivesse aberto a fonte primária em vez de confiar no meu próprio resumo, não teria errado. A lição não é "a documentação é ruim", é **não usar resumo como fonte** — e desconfiar de um `200` vazio, porque nessa API ele não distingue "não tem dado" de "perguntei errado".
+
+Foi esse tombo que me fez medir o resto. As quatro armadilhas seguintes são de outra natureza: **a documentação é silenciosa sobre elas** — não menciona `totalCount`, nem paginação, nem os filtros de `/posts`, nem quais campos vêm nulos em qual endpoint. Nenhuma dá para deduzir lendo; todas foram medidas contra a API real, entre junho e agosto de 2026.
 
 ---
 
@@ -37,7 +41,7 @@ if (!completa) {
 
 ---
 
-## As cinco armadilhas
+## As quatro armadilhas não documentadas
 
 ### 1. A listagem devolve menos do que ela mesma declara
 
@@ -59,17 +63,11 @@ const advbox = new AdvboxClient({ estrito: true });
 await advbox.clientes();   // lança RESPOSTA_TRUNCADA
 ```
 
-### 2. Caminho inexistente responde `200`, não `404`
+### 2. `?origin=TRIBUNAL` é aceito e ignorado
 
-`/lawsuits/{id}/movements` parece certo e não existe. O caminho real é **`/movements/{lawsuitId}`**. O mesmo vale para o histórico: é `/history/{lawsuitId}`, não `/lawsuits/{id}/history`.
+Esse parâmetro **não está na documentação** — e é justamente o problema: a API o aceita, responde `200`, e não filtra nada. Um andamento escrito pelo *seu próprio sistema* volta tanto em `origin=TRIBUNAL` quanto em `origin=MANUAL`.
 
-**Como esta biblioteca trata:** o caminho nunca vem de fora. Não existe um método `get(path)` genérico — só métodos nomeados, com o caminho conferido. Você não consegue montar o caminho errado.
-
-> **Regra que vale para qualquer API assim:** uma resposta `200` com coleção vazia é ambígua. Pode ser ausência de dado ou pergunta errada. Não conclua "não tem" sem antes conferir o caminho na fonte primária.
-
-### 3. `?origin=TRIBUNAL` não filtra por origem
-
-Um andamento escrito pelo *seu próprio sistema* volta tanto em `origin=TRIBUNAL` quanto em `origin=MANUAL`. O filtro simplesmente não separa.
+Parâmetro desconhecido que devolve erro é um aborrecimento de cinco minutos. Parâmetro desconhecido que é silenciosamente ignorado passa em revisão de código, passa em teste manual, e só aparece em produção como dado errado.
 
 O que separa é o campo **`header`**: a sigla do tribunal (`"TJRJ"`) quando veio do Judiciário, `null` quando é registro interno.
 
@@ -83,7 +81,7 @@ origemDoAndamento({ header: null });     // 'interno'
 origemDoAndamento({ description: '…' }); // 'desconhecido'  ← não assume nada
 ```
 
-### 4. A chamada barata é justamente a que perde o campo que decide
+### 3. A chamada barata é justamente a que perde o campo que decide
 
 `GET /last_movements` traz o último andamento de **todos** os processos numa requisição só — e devolve `header` **nulo em todos os registros**.
 
@@ -100,7 +98,7 @@ if (!origemEhDecidivel(itens)) {
 }
 ```
 
-### 5. Tarefa concluída desaparece da lista de tarefas
+### 4. Tarefa concluída desaparece da lista de tarefas
 
 `created_*` e `completed_*` são janelas **mutuamente exclusivas**. Uma tarefa concluída *sai* da lista de criadas e passa a existir só na de concluídas.
 

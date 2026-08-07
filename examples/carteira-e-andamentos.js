@@ -17,7 +17,7 @@ async function main() {
 
   const carteira = await advbox.processos();
 
-  // Armadilha nº 1: nunca assuma que a lista veio inteira.
+  // ARMADILHA: nunca assuma que a lista veio inteira.
   if (!carteira.completa) {
     console.warn(
       `⚠️  A API devolveu ${carteira.itens.length} de ${carteira.total} processos ` +
@@ -25,7 +25,7 @@ async function main() {
     );
   }
 
-  // Armadilha nº 2 (de leitura): sem número de processo não há o que rastrear.
+  // Sem número de processo não há o que rastrear no tribunal.
   // Ausência de andamento aqui é o esperado — não é "sem novidade".
   const rastreaveis = carteira.itens.filter(p => rastreabilidade(p) === 'rastreavel');
   const semNumero = carteira.itens.length - rastreaveis.length;

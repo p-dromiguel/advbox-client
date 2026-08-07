@@ -2,11 +2,11 @@
 
 /**
  * Funções PURAS sobre andamentos. Sem rede, sem estado — dá para testar cada
- * regra isolada, e é onde mora a armadilha nº 5.
+ * regra isolada — e é onde mora a armadilha do filtro de origem.
  */
 
 /**
- * Armadilha nº 5: `?origin=TRIBUNAL` NÃO filtra.
+ * ARMADILHA (filtro de origem): `?origin=TRIBUNAL` é aceito e ignorado.
  *
  * Um andamento escrito pelo seu próprio sistema (por exemplo "Cobrança gerada —
  * 1ª parcela") volta tanto em `origin=TRIBUNAL` quanto em `origin=MANUAL`. Quem
