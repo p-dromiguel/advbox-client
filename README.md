@@ -2,6 +2,8 @@
 
 Cliente Node para a API do [ADVBOX](https://www.advbox.com.br/), escrito em volta do comportamento que a documentação oficial não descreve.
 
+[![testes](https://github.com/p-dromiguel/advbox-client/actions/workflows/testes.yml/badge.svg)](https://github.com/p-dromiguel/advbox-client/actions/workflows/testes.yml)
+
 Zero dependências. Node 18+.
 
 ---
@@ -18,14 +20,16 @@ Esse caminho não existe, e a API responde `200` em vez de `404`. No caminho cer
 
 **O caminho certo — `GET /movements/{lawsuit_id}` — está na documentação oficial.** Se eu tivesse aberto a fonte primária em vez de confiar no meu próprio resumo, não teria errado. A lição não é "a documentação é ruim", é **não usar resumo como fonte** — e desconfiar de um `200` vazio, porque nessa API ele não distingue "não tem dado" de "perguntei errado".
 
-Foi esse tombo que me fez medir o resto. As quatro armadilhas seguintes são de outra natureza: **a documentação é silenciosa sobre elas** — não menciona `totalCount`, nem paginação, nem os filtros de `/posts`, nem quais campos vêm nulos em qual endpoint. Nenhuma dá para deduzir lendo; todas foram medidas contra a API real, entre junho e agosto de 2026.
+Foi esse tombo que me fez medir o resto. As quatro armadilhas seguintes são de outra natureza: **a documentação é silenciosa sobre elas** — não menciona `totalCount`, nem paginação, nem os filtros de `/posts`, nem quais campos vêm nulos em qual endpoint. Nenhuma dá para deduzir lendo; todas foram medidas contra a API real, entre junho e setembro de 2026.
 
 ---
 
 ## Instalação
 
+Ainda não está publicado no npm. Instale direto do GitHub:
+
 ```bash
-npm install advbox-client
+npm install github:p-dromiguel/advbox-client
 ```
 
 ```js
@@ -43,25 +47,29 @@ if (!completa) {
 
 ## As quatro armadilhas não documentadas
 
-### 1. A listagem devolve menos do que ela mesma declara
+### 1. A listagem devolve menos do que declara — e às vezes esconde sem declarar
 
-`GET /customers` já devolveu **377 registros num corpo que declarava `totalCount: 447`**. `GET /posts`, 157 declarando 169. Paginar por offset não alcança os que faltam.
+`GET /posts` já devolveu **157 registros num corpo que declarava `totalCount: 169`**. Paginar por offset não alcança os 12 que faltam.
 
 Se o cliente devolve um array, quem chama não tem como perceber. Uma auditoria em cima de uma base pela metade acusa de "não cadastrado" gente que está cadastrada.
 
 **Como esta biblioteca trata:** nenhuma listagem devolve array. Todas devolvem `{ itens, total, completa, faltando }` — o formato torna impossível confundir parte com todo.
 
 ```js
-const r = await advbox.clientes();
-// { itens: [...377], total: 447, completa: false, faltando: 70 }
+const r = await advbox.tarefasCriadas({ de, ate });
+// { itens: [...157], total: 169, completa: false, faltando: 12 }
 ```
 
 Ou, quando você prefere quebrar a não seguir com dado incompleto:
 
 ```js
 const advbox = new AdvboxClient({ estrito: true });
-await advbox.clientes();   // lança RESPOSTA_TRUNCADA
+await advbox.tarefasCriadas({ de, ate });   // lança RESPOSTA_TRUNCADA
 ```
+
+**O buraco que o `totalCount` não admite: cliente sem origem.** `GET /customers` devolveu 377 registros e declarou 377 — tudo certo, pela conta da própria API. Só que as partes citadas em `GET /lawsuits` somavam **447 pessoas**, e as 70 de diferença existem: `GET /customers/{id}` responde `200` com a ficha completa. A causa: **a listagem esconde quem está sem origem, e o `totalCount` esconde junto.** Quase todas vieram de uma importação que criou a ficha só com o nome.
+
+Aqui `completa` vem `true`, porque a API não admite o buraco. Para ter a base inteira, junte a listagem com as partes de `GET /lawsuits` — e atenção: lá a chave é `customer_id`, não `id`. Preencher a origem no ADVBOX faz o cliente voltar a aparecer na listagem.
 
 ### 2. `?origin=TRIBUNAL` é aceito e ignorado
 
@@ -171,7 +179,7 @@ Atenção: na coleção `tasks`, o nome fica no campo **`task`**, não em `name`
 npm test
 ```
 
-28 testes, sem rede e sem segredo — o `fetch` é injetado. As armadilhas são testadas com os números reais que as revelaram (377 de 447, 157 de 169).
+28 testes, sem rede e sem segredo — o `fetch` é injetado. As armadilhas são testadas com os números reais que as revelaram (157 de 169).
 
 ---
 
@@ -179,7 +187,7 @@ npm test
 
 Só leitura, por enquanto. A API tem rotas de escrita (`POST /customers`, `POST /lawsuits`, `POST /posts`, `POST /movements`), mas escrever no sistema de um escritório é decisão, não conveniência — e a API **não tem DELETE nem PUT de tarefa**, então o que entra errado fica. Prefiro publicar a parte que não pode causar dano.
 
-Não é um projeto oficial nem tem qualquer relação com o ADVBOX. Foi escrito a partir de comportamento observado contra a API real, e o comportamento pode mudar sem aviso — os números citados foram medidos entre junho e agosto de 2026.
+Não é um projeto oficial nem tem qualquer relação com o ADVBOX. Foi escrito a partir de comportamento observado contra a API real, e o comportamento pode mudar sem aviso — os números citados foram medidos entre junho e setembro de 2026.
 
 ## Licença
 

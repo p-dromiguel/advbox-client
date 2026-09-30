@@ -107,10 +107,12 @@ class AdvboxClient {
   /**
    * Normaliza uma listagem e CONFERE o total declarado pela própria API.
    *
-   * ARMADILHA (listagem truncada): `GET /customers` já devolveu 377 declarando
-   * `totalCount: 447` no mesmo corpo. `GET /posts`, 157 declarando 169. Paginar
-   * por offset não alcança o resto. Quem recebe só o array acha que tem a base
-   * inteira — e uma auditoria em cima disso acusa gente que está cadastrada.
+   * ARMADILHA (listagem truncada): `GET /posts` já devolveu 157 registros
+   * declarando `totalCount: 169` no mesmo corpo. Paginar por offset não alcança
+   * o resto. Quem recebe só o array acha que tem a base inteira.
+   *
+   * Isto só pega o buraco que a API ADMITE. O de `GET /customers` ela não admite:
+   * ver `clientes()`.
    */
   _lista(dados, contexto) {
     const itens = Array.isArray(dados) ? dados : (dados && dados.data) || [];
@@ -136,7 +138,17 @@ class AdvboxClient {
 
   // ── clientes ───────────────────────────────────────────────────────────────
 
-  /** GET /customers — @returns {{itens, total, completa, faltando}} */
+  /**
+   * GET /customers — @returns {{itens, total, completa, faltando}}
+   *
+   * ARMADILHA que `completa` NÃO detecta: a listagem esconde os clientes que
+   * estão SEM ORIGEM, e o `totalCount` esconde junto. Medido: a listagem trouxe
+   * 377 e declarou 377, enquanto as partes citadas em `GET /lawsuits` somavam 447.
+   * Os 70 existem (`GET /customers/{id}` responde 200 com a ficha); quase todos
+   * vieram de uma importação que criou a ficha só com o nome. Para ter a base
+   * inteira, junte esta listagem com as partes de `GET /lawsuits` (lá a chave é
+   * `customer_id`, aqui é `id`).
+   */
   async clientes({ limit = 1000 } = {}) {
     return this._lista(await this._req('GET', `/customers?limit=${limit}`), 'GET /customers');
   }

@@ -33,15 +33,16 @@ test('listagem completa: completa=true e nada faltando', async () => {
 });
 
 test('a API entrega menos do que declara → completa=false, com a conta', async () => {
-  // O caso real: 377 registros num corpo que declara 447.
-  const data = Array.from({ length: 377 }, (_, i) => ({ id: i }));
-  const c = cliente({ data, totalCount: 447 });
+  // O caso real é o de GET /posts: 157 registros num corpo que declara 169. O mecanismo
+  // é o mesmo em qualquer listagem, então o teste passa por clientes().
+  const data = Array.from({ length: 157 }, (_, i) => ({ id: i }));
+  const c = cliente({ data, totalCount: 169 });
   const r = await c.clientes();
 
-  assert.equal(r.itens.length, 377);
-  assert.equal(r.total, 447);
+  assert.equal(r.itens.length, 157);
+  assert.equal(r.total, 169);
   assert.equal(r.completa, false);
-  assert.equal(r.faltando, 70);
+  assert.equal(r.faltando, 12);
 });
 
 test('modo estrito lança em vez de deixar passar', async () => {
