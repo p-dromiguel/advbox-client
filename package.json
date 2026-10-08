@@ -1,12 +1,13 @@
 {
   "name": "advbox-client",
-  "version": "0.1.0",
-  "description": "Cliente Node para a API do ADVBOX que trata o comportamento não documentado — listagem que devolve menos do que declara, parâmetro aceito e ignorado, e listas de tarefa mutuamente exclusivas.",
+  "version": "0.2.0",
+  "description": "Cliente Node para a API do ADVBOX que trata o comportamento não documentado — listagem que devolve menos do que declara, parâmetro aceito e ignorado, tarefa concluída por convidado e histórico com teto de 20.",
   "main": "index.js",
   "files": [
     "index.js",
     "src",
     "README.md",
+    "CHANGELOG.md",
     "LICENSE"
   ],
   "scripts": {

@@ -10,13 +10,21 @@ const BASE = 'https://app.advbox.com.br/api/v1';
 const INTERVALO_MIN_MS = 2100;
 const TIMEOUT_PADRAO_MS = 15000;
 
+// Tamanho de página das listagens paginadas. É o maior que a API aceita.
+const POR_PAGINA = 1000;
+
+// GET /history/{id} devolve no máximo 20 itens, e `offset` e `page` são
+// ignorados: a segunda "página" volta com os mesmos 20. Medido num processo
+// com 432 tarefas.
+const TETO_HISTORICO = 20;
+
 /**
  * Cliente da API do ADVBOX.
  *
  * O que este cliente faz de diferente de um wrapper qualquer: ele não devolve
  * lista crua. Toda listagem volta como {itens, total, completa} — porque a API
  * devolve menos do que ela mesma declara, e quem recebe um array não tem como
- * saber disso. Ver README, seção "As quatro armadilhas não documentadas".
+ * saber disso. Ver README, seção "As armadilhas não documentadas".
  */
 class AdvboxClient {
   /**
@@ -59,9 +67,10 @@ class AdvboxClient {
 
   /**
    * Requisição crua. Só é usada pelos métodos nomeados desta classe — o caminho
-   * nunca vem de fora. Isso é deliberado: caminho inexistente nesta API responde
-   * 200 com lista vazia, não 404, então caminho montado por quem chama é uma
-   * fonte silenciosa de "não tem dado" quando na verdade tem.
+   * e os parâmetros nunca vêm de fora. Isso é deliberado: caminho inexistente
+   * nesta API não responde 404 (já respondeu 200 com lista vazia, hoje responde
+   * 401), e parâmetro desconhecido é ignorado com 200 e a base inteira. Caminho
+   * ou filtro montado por quem chama é uma fonte silenciosa de dado errado.
    */
   async _req(metodo, caminho, corpo) {
     await this._esperarVez();
@@ -86,8 +95,13 @@ class AdvboxClient {
 
       if (!r.ok) {
         const msg = (dados && (dados.message || dados.error)) || texto || `HTTP ${r.status}`;
+        // Rota inexistente responde 401 "Unauthenticated.", igual a token inválido.
+        // Sem a dica, a primeira reação é trocar um token que estava certo.
+        const dica = r.status === 401
+          ? ' (nesta API, 401 é também a resposta para rota inexistente: confira o caminho antes do token)'
+          : '';
         // A mensagem nunca inclui o token: só método, caminho e o que a API disse.
-        const err = new Error(`ADVBOX ${metodo} ${caminho} → ${r.status}: ${String(msg).slice(0, 300)}`);
+        const err = new Error(`ADVBOX ${metodo} ${caminho} → ${r.status}: ${String(msg).slice(0, 300)}${dica}`);
         err.status = r.status;
         throw err;
       }
@@ -108,8 +122,9 @@ class AdvboxClient {
    * Normaliza uma listagem e CONFERE o total declarado pela própria API.
    *
    * ARMADILHA (listagem truncada): `GET /posts` já devolveu 157 registros
-   * declarando `totalCount: 169` no mesmo corpo. Paginar por offset não alcança
-   * o resto. Quem recebe só o array acha que tem a base inteira.
+   * declarando `totalCount: 169` no mesmo corpo. Paginar até o fim não fecha a
+   * conta: as concluídas declararam 3.308 e entregaram 3.193 em quatro páginas.
+   * Quem recebe só o array acha que tem a base inteira.
    *
    * Isto só pega o buraco que a API ADMITE. O de `GET /customers` ela não admite:
    * ver `clientes()`.
@@ -124,6 +139,48 @@ class AdvboxClient {
       throw new RESPOSTA_TRUNCADA(contexto, itens.length, total);
     }
     return { itens, total, completa, faltando: completa ? 0 : total - itens.length };
+  }
+
+  /**
+   * Busca uma listagem página por página e devolve no formato de `_lista`.
+   *
+   * Três cuidados, todos medidos:
+   * - para na página CURTA, não no `totalCount`: o total declarado oscila entre
+   *   chamadas seguidas (227 → 225) e é maior do que o alcançável;
+   * - tira repetição por `id`: offset sobre uma lista que muda durante a
+   *   varredura pode trazer o mesmo registro em duas páginas;
+   * - para se uma página não trouxer nada novo: rota que ignora `offset` devolve
+   *   a mesma página para sempre (é o que `/history` faz).
+   *
+   * O total comparado no fim é o MAIOR que a API declarou durante a varredura.
+   * Se ela declarou 227 e depois 225, pode ter sido exclusão legítima ou contagem
+   * instável; daqui não dá para saber, então a listagem sai como incompleta.
+   */
+  async _paginar(caminho, contexto) {
+    const sep = caminho.includes('?') ? '&' : '?';
+    const vistos = new Set();
+    const itens = [];
+    let declarado = null;
+
+    for (let offset = 0; ; offset += POR_PAGINA) {
+      const dados = await this._req('GET', `${caminho}${sep}limit=${POR_PAGINA}&offset=${offset}`);
+      const lote = Array.isArray(dados) ? dados : (dados && dados.data) || [];
+      if (dados && typeof dados.totalCount === 'number') {
+        declarado = Math.max(declarado == null ? 0 : declarado, dados.totalCount);
+      }
+
+      let novos = 0;
+      for (const item of lote) {
+        if (item && item.id != null) {
+          if (vistos.has(item.id)) continue;
+          vistos.add(item.id);
+        }
+        itens.push(item);
+        novos++;
+      }
+      if (lote.length < POR_PAGINA || novos === 0) break;
+    }
+    return this._lista({ data: itens, totalCount: declarado }, contexto);
   }
 
   // ── configurações da conta ─────────────────────────────────────────────────
@@ -149,8 +206,8 @@ class AdvboxClient {
    * inteira, junte esta listagem com as partes de `GET /lawsuits` (lá a chave é
    * `customer_id`, aqui é `id`).
    */
-  async clientes({ limit = 1000 } = {}) {
-    return this._lista(await this._req('GET', `/customers?limit=${limit}`), 'GET /customers');
+  async clientes() {
+    return this._paginar('/customers', 'GET /customers');
   }
 
   /**
@@ -175,8 +232,8 @@ class AdvboxClient {
   // ── processos ──────────────────────────────────────────────────────────────
 
   /** GET /lawsuits */
-  async processos({ limit = 1000 } = {}) {
-    return this._lista(await this._req('GET', `/lawsuits?limit=${limit}`), 'GET /lawsuits');
+  async processos() {
+    return this._paginar('/lawsuits', 'GET /lawsuits');
   }
 
   /** GET /lawsuits/{id} */
@@ -219,12 +276,27 @@ class AdvboxClient {
     return this._lista(await this._req('GET', '/last_movements'), 'GET /last_movements');
   }
 
-  /** GET /history/{lawsuitId} — não é `/lawsuits/{id}/history`. */
+  /**
+   * GET /history/{lawsuitId} — não é `/lawsuits/{id}/history`.
+   *
+   * ARMADILHA (teto fixo): a rota devolve no máximo 20 itens e não pagina —
+   * `offset` e `page` são ignorados e trazem os mesmos 20. Não há `totalCount`
+   * para denunciar o corte. Medido: processo com 432 tarefas, 20 no histórico.
+   *
+   * Por isso, ao bater no teto, a listagem volta com `completa: false` e
+   * `total: null` (o total real é desconhecido, e inventar um seria pior).
+   */
   async historico(lawsuitId) {
-    return this._lista(
+    const contexto = `GET /history/${lawsuitId}`;
+    const { itens } = this._lista(
       await this._req('GET', `/history/${encodeURIComponent(lawsuitId)}`),
-      `GET /history/${lawsuitId}`
+      contexto
     );
+    if (itens.length < TETO_HISTORICO) {
+      return { itens, total: itens.length, completa: true, faltando: 0 };
+    }
+    if (this._estrito) throw new RESPOSTA_TRUNCADA(contexto, itens.length, null);
+    return { itens, total: null, completa: false, faltando: null };
   }
 
   // ── tarefas ────────────────────────────────────────────────────────────────
@@ -232,43 +304,62 @@ class AdvboxClient {
   /**
    * GET /posts — tarefas.
    *
-   * ARMADILHA (listas exclusivas): `created_*` e `completed_*` são MUTUAMENTE
-   * EXCLUSIVAS. Tarefa concluída SAI da lista de criadas e passa a existir só na
-   * de concluídas. Lendo uma só, metade do histórico some sem nenhum aviso — e o
-   * que some é exatamente o trabalho que foi terminado.
+   * ARMADILHA (conclusão por convidado): a conclusão não é da tarefa, é de cada
+   * convidado (`users[].completed`). As duas janelas de `GET /posts` seguem isso:
+   * - `created_*` traz a tarefa enquanto ALGUM convidado ainda não concluiu.
+   *   A que todos concluíram sai dela;
+   * - `completed_*` traz a tarefa assim que o PRIMEIRO convidado conclui.
    *
-   * Por isso o padrão aqui é buscar as DUAS e devolver junto, com a origem
-   * marcada em cada item (`_lista_origem`). Para uma só, use `tarefasCriadas` ou
-   * `tarefasConcluidas` e assuma o buraco conscientemente.
+   * Então quem lê só a de criadas perde o trabalho terminado, e quem junta as
+   * duas por concatenação conta duas vezes a tarefa concluída pela metade, que
+   * está nas duas ao mesmo tempo (22 numa base de 3.356, medido). Pior ainda é
+   * subtrair os ids das concluídas das criadas para achar "o que está aberto":
+   * some a tarefa que ainda está aberta para alguém.
+   *
+   * Por isso o padrão aqui é buscar as DUAS e unir por `id`, com a origem
+   * marcada em cada item (`_lista_origem`: 'criadas' | 'concluidas' | 'ambas').
+   * "Aberta para quem" se responde com `convidadosPendentes(tarefa)`.
+   *
+   * `faltando` soma o que faltou nas duas listas, então é um teto: o que faltou
+   * numa pode ser o mesmo que faltou na outra.
    */
   async tarefas({ de, ate } = {}) {
     const [criadas, concluidas] = await Promise.all([
       this.tarefasCriadas({ de, ate }),
       this.tarefasConcluidas({ de, ate }),
     ]);
-    const itens = [
-      ...criadas.itens.map(t => ({ ...t, _lista_origem: 'criadas' })),
-      ...concluidas.itens.map(t => ({ ...t, _lista_origem: 'concluidas' })),
-    ];
+    const porId = new Map();
+    for (const t of criadas.itens) porId.set(t.id, { ...t, _lista_origem: 'criadas' });
+    for (const t of concluidas.itens) {
+      const ja = porId.get(t.id);
+      porId.set(t.id, ja ? { ...ja, _lista_origem: 'ambas' } : { ...t, _lista_origem: 'concluidas' });
+    }
+    const itens = [...porId.values()];
+    const faltando = criadas.faltando + concluidas.faltando;
     return {
       itens,
-      total: criadas.total + concluidas.total,
+      total: itens.length + faltando,
       completa: criadas.completa && concluidas.completa,
-      faltando: criadas.faltando + concluidas.faltando,
+      faltando,
       partes: { criadas, concluidas },
     };
   }
 
-  /** GET /posts com janela de CRIAÇÃO. Não inclui tarefa concluída. */
+  /**
+   * GET /posts com janela de CRIAÇÃO. Traz a tarefa enquanto algum convidado
+   * ainda não concluiu; a que todos concluíram não vem.
+   */
   async tarefasCriadas({ de, ate } = {}) {
-    const qs = janela('created', de, ate);
-    return this._lista(await this._req('GET', `/posts${qs}`), 'GET /posts (criadas)');
+    return this._paginar(`/posts${janela('created', de, ate)}`, 'GET /posts (criadas)');
   }
 
-  /** GET /posts com janela de CONCLUSÃO. Só tarefa concluída. */
+  /**
+   * GET /posts com janela de CONCLUSÃO (a data é a da conclusão, não a da
+   * criação). Traz a tarefa assim que o primeiro convidado conclui, mesmo com
+   * outros ainda pendentes.
+   */
   async tarefasConcluidas({ de, ate } = {}) {
-    const qs = janela('completed', de, ate);
-    return this._lista(await this._req('GET', `/posts${qs}`), 'GET /posts (concluídas)');
+    return this._paginar(`/posts${janela('completed', de, ate)}`, 'GET /posts (concluídas)');
   }
 }
 
