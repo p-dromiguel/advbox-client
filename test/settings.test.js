@@ -50,6 +50,17 @@ test('coleção desconhecida é erro de programação, não null silencioso', ()
   assert.throws(() => resolverId(SETTINGS, 'inexistente', 'x'), /Coleção desconhecida/);
 });
 
+test('coleção que não veio na resposta é erro, não "não achei"', () => {
+  // A lawsuit_types existe na API, mas esta amostra não a trouxe.
+  assert.throws(() => resolverId(SETTINGS, 'lawsuit_types', 'CÍVEL'), /não trouxe a coleção "lawsuit_types"/);
+  assert.throws(() => resolverId(null, 'users', 'ANA'), /não trouxe a coleção "users"/);
+});
+
+test('steps e groups não existem no /settings: pedir é erro de programação', () => {
+  assert.throws(() => resolverId(SETTINGS, 'steps', 'X'), /Coleção desconhecida/);
+  assert.throws(() => resolverId(SETTINGS, 'groups', 'X'), /Coleção desconhecida/);
+});
+
 test('nomesDisponiveis ajuda a mensagem de erro a dizer o que existe', () => {
   assert.deepEqual(nomesDisponiveis(SETTINGS, 'tasks'), [
     'ELABORAR PETIÇÃO INICIAL',

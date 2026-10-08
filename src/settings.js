@@ -8,15 +8,17 @@
  * — grava no lugar errado, calado.
  */
 
-/** Onde cada coleção do /settings guarda o nome legível. */
+/**
+ * Onde cada coleção do /settings guarda o nome legível. São as coleções que a
+ * doc lista e que a API devolve (conferido em 08/10/2026). `financial` fica de
+ * fora: é um objeto com subcoleções, e esta biblioteca não lê transações.
+ */
 const CHAVE_DO_NOME = {
   users: 'name',
   origins: 'origin',
   stages: 'stage',
   lawsuit_types: 'type',
-  tasks: 'task',      // atenção: é `task`, não `name` — o mais fácil de errar
-  steps: 'step',
-  groups: 'group',
+  tasks: 'task',      // atenção: é `task`, não `name`, o mais fácil de errar
 };
 
 function normalizar(s) {
@@ -45,7 +47,12 @@ function resolverId(settings, colecao, nome) {
 function resolverItem(settings, colecao, nome) {
   const chave = CHAVE_DO_NOME[colecao];
   if (!chave) throw new Error(`Coleção desconhecida em /settings: "${colecao}".`);
-  const lista = (settings && settings[colecao]) || [];
+  // Coleção que não veio na resposta é diferente de nome que não existe nela:
+  // devolver null aqui diria "não achei" quando a pergunta nem pôde ser feita.
+  if (!settings || !Array.isArray(settings[colecao])) {
+    throw new Error(`A resposta do /settings não trouxe a coleção "${colecao}".`);
+  }
+  const lista = settings[colecao];
   const alvo = normalizar(nome);
   if (!alvo) return null;
   return lista.find(o => normalizar(o[chave]) === alvo) || null;

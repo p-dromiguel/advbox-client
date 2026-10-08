@@ -1,20 +1,20 @@
 'use strict';
 
 /**
- * Funções PURAS sobre andamentos. Sem rede, sem estado — dá para testar cada
- * regra isolada — e é onde mora a armadilha do filtro de origem.
+ * Funções PURAS sobre andamentos. Sem rede, sem estado: dá para testar cada
+ * regra isolada.
  */
 
 /**
- * ARMADILHA (filtro de origem): `?origin=TRIBUNAL` é aceito e ignorado.
+ * De onde veio o andamento, decidido pelo campo `header`: preenchido com o
+ * tribunal (ex.: "TJRJ") quando veio do Judiciário, nulo quando é registro
+ * interno (o que o seu sistema escreveu por `POST /lawsuits/movement`).
  *
- * Um andamento escrito pelo seu próprio sistema (por exemplo "Cobrança gerada —
- * 1ª parcela") volta tanto em `origin=TRIBUNAL` quanto em `origin=MANUAL`. Quem
- * confia nesse filtro para decidir "chegou novidade do tribunal" acaba avisando
- * o cliente sobre um boleto que o próprio sistema emitiu.
- *
- * O que separa de verdade é o campo `header`: preenchido com a sigla do tribunal
- * (ex.: "TJRJ") quando veio do Judiciário, nulo quando é registro interno.
+ * Por que não confiar só no `?origin=` de `GET /movements/{id}`: o filtro é
+ * documentado, mas em agosto de 2026 deixava andamento interno ("Cobrança gerada,
+ * 1ª parcela") voltar também em `origin=TRIBUNAL`. Remedido em 08/10/2026, separa
+ * certo (21 do tribunal, 1 interno). Classificar pelo `header` dá o mesmo
+ * resultado hoje e não depende de o filtro continuar funcionando.
  *
  * @returns {'tribunal'|'interno'|'desconhecido'}
  */
@@ -30,8 +30,8 @@ function origemDoAndamento(andamento) {
  * Só os andamentos que vieram mesmo do tribunal.
  *
  * Aviso: não use com o resultado de `ultimosAndamentos()`. Aquela chamada
- * devolve `header` nulo em TODOS os registros, então tudo seria classificado
- * como interno e o filtro voltaria vazio — de novo, um vazio que mente.
+ * não traz o campo `header`, então tudo sairia 'desconhecido' e o filtro
+ * voltaria vazio: de novo, um vazio que mente.
  */
 function apenasDoTribunal(andamentos) {
   return (andamentos || []).filter(a => origemDoAndamento(a) === 'tribunal');
@@ -40,7 +40,8 @@ function apenasDoTribunal(andamentos) {
 /**
  * A resposta de `ultimosAndamentos()` serve para classificar origem?
  *
- * Guarda explícita: se todo `header` da amostra é nulo, a origem não é
+ * Guarda explícita: se nenhum item da amostra traz `header` preenchido (nulo
+ * ou campo ausente, que é o caso de `ultimosAndamentos()`), a origem não é
  * decidível a partir desses dados. Chamar antes de filtrar evita concluir
  * "nenhum andamento do tribunal" a partir de um campo que a chamada não traz.
  */

@@ -17,6 +17,7 @@ const POR_PAGINA = 1000;
 // ignorados: a segunda "página" volta com os mesmos 20. Medido num processo
 // com 432 tarefas.
 const TETO_HISTORICO = 20;
+const STATUS_HISTORICO = ['pending', 'completed', 'all'];
 
 /**
  * Cliente da API do ADVBOX.
@@ -24,7 +25,7 @@ const TETO_HISTORICO = 20;
  * O que este cliente faz de diferente de um wrapper qualquer: ele não devolve
  * lista crua. Toda listagem volta como {itens, total, completa} — porque a API
  * devolve menos do que ela mesma declara, e quem recebe um array não tem como
- * saber disso. Ver README, seção "As armadilhas não documentadas".
+ * saber disso. Ver README, seção "As cinco armadilhas".
  */
 class AdvboxClient {
   /**
@@ -147,8 +148,8 @@ class AdvboxClient {
    * Três cuidados, todos medidos:
    * - para na página CURTA, não no `totalCount`: o total declarado oscila entre
    *   chamadas seguidas (227 → 225) e é maior do que o alcançável;
-   * - tira repetição por `id`: offset sobre uma lista que muda durante a
-   *   varredura pode trazer o mesmo registro em duas páginas;
+   * - tira repetição pela `chave` (`id` por padrão): offset sobre uma lista que
+   *   muda durante a varredura pode trazer o mesmo registro em duas páginas;
    * - para se uma página não trouxer nada novo: rota que ignora `offset` devolve
    *   a mesma página para sempre (é o que `/history` faz).
    *
@@ -156,7 +157,7 @@ class AdvboxClient {
    * Se ela declarou 227 e depois 225, pode ter sido exclusão legítima ou contagem
    * instável; daqui não dá para saber, então a listagem sai como incompleta.
    */
-  async _paginar(caminho, contexto) {
+  async _paginar(caminho, contexto, chave = 'id') {
     const sep = caminho.includes('?') ? '&' : '?';
     const vistos = new Set();
     const itens = [];
@@ -171,9 +172,9 @@ class AdvboxClient {
 
       let novos = 0;
       for (const item of lote) {
-        if (item && item.id != null) {
-          if (vistos.has(item.id)) continue;
-          vistos.add(item.id);
+        if (item && item[chave] != null) {
+          if (vistos.has(item[chave])) continue;
+          vistos.add(item[chave]);
         }
         itens.push(item);
         novos++;
@@ -224,9 +225,9 @@ class AdvboxClient {
     return itens.find(c => String(c.identification || '').replace(/\D/g, '') === digitos) || null;
   }
 
-  /** GET /customers/birthdays */
+  /** GET /customers/birthdays — aniversariantes do mês atual. */
   async aniversariantes() {
-    return this._lista(await this._req('GET', '/customers/birthdays'), 'GET /customers/birthdays');
+    return this._paginar('/customers/birthdays', 'GET /customers/birthdays');
   }
 
   // ── processos ──────────────────────────────────────────────────────────────
@@ -247,12 +248,15 @@ class AdvboxClient {
    * GET /movements/{lawsuitId} — andamentos de UM processo.
    *
    * CUIDADO: o caminho NÃO é `/lawsuits/{id}/movements`. Esse caminho não
-   * existe e a API responde 200 com lista vazia em vez de 404 — o que se lê como
-   * "este processo não tem andamento". Em um caso real havia 23 movimentações do
-   * tribunal num processo dado como parado.
+   * existe, e em agosto de 2026 a API respondia 200 com lista vazia em vez de
+   * 404, o que se lê como "este processo não tem andamento". Em um caso real
+   * havia 23 movimentações do tribunal num processo dado como parado.
    *
-   * Este é o único método que traz `header` preenchido, e é o `header` que
-   * distingue andamento do tribunal do que o seu próprio sistema escreveu.
+   * Este é o único método que traz `header`, e é o `header` que distingue
+   * andamento do tribunal do que o seu próprio sistema escreveu.
+   *
+   * A doc diz que id inexistente responde 204; medido em 08/10/2026, responde
+   * 404 "Not found.", que aqui vira erro com `status: 404`.
    */
   async andamentos(lawsuitId) {
     if (lawsuitId == null || lawsuitId === '') {
@@ -265,31 +269,49 @@ class AdvboxClient {
   }
 
   /**
-   * GET /last_movements — último andamento de CADA processo, numa chamada só.
+   * GET /last_movements — último andamento de CADA processo, um item por processo.
    *
-   * ARMADILHA (campo perdido em lote): é a chamada barata, mas devolve `header` NULO em todos os
-   * registros — justamente o campo que diria se o andamento veio do tribunal ou
-   * foi escrito pelo seu sistema. Serve para descobrir ONDE olhar; não serve
-   * para decidir a origem. Para isso, `andamentos(id)`, um processo por vez.
+   * ARMADILHA (campo perdido em lote): é a chamada barata, mas não traz o campo
+   * `header`, que é o que diria se o andamento veio do tribunal ou foi escrito
+   * pelo seu sistema. O exemplo da doc mostra o campo preenchido; medido em
+   * 08/10/2026, ele não veio em nenhum dos 182 itens. Serve para descobrir ONDE
+   * olhar; não serve para decidir a origem. Para isso, `andamentos(id)`.
+   *
+   * O padrão da rota é 100 itens por página (documentado), então ela é
+   * paginada. O item não tem `id`: a chave é `lawsuit_id`.
    */
   async ultimosAndamentos() {
-    return this._lista(await this._req('GET', '/last_movements'), 'GET /last_movements');
+    return this._paginar('/last_movements', 'GET /last_movements', 'lawsuit_id');
   }
 
   /**
    * GET /history/{lawsuitId} — não é `/lawsuits/{id}/history`.
    *
-   * ARMADILHA (teto fixo): a rota devolve no máximo 20 itens e não pagina —
-   * `offset` e `page` são ignorados e trazem os mesmos 20. Não há `totalCount`
-   * para denunciar o corte. Medido: processo com 432 tarefas, 20 no histórico.
+   * ARMADILHA (teto fixo): a doc diz que a rota "retorna todas as tarefas do
+   * processo de uma vez". Devolve no máximo 20, e não pagina (`offset` e `page`
+   * são ignorados, como a doc avisa). Não há `totalCount` para denunciar o
+   * corte. Medido: processo com 432 tarefas, 20 no histórico.
    *
    * Por isso, ao bater no teto, a listagem volta com `completa: false` e
    * `total: null` (o total real é desconhecido, e inventar um seria pior).
+   *
+   * @param {object} [opts]
+   * @param {'pending'|'completed'|'all'} [opts.status] Filtro documentado, e
+   *   funciona: reduz o recorte (16 pendentes onde o padrão trazia 20). O teto
+   *   vale do mesmo jeito. Valor fora desses três é recusado aqui, porque a API
+   *   ignora valor inválido em silêncio e devolve tudo.
    */
-  async historico(lawsuitId) {
-    const contexto = `GET /history/${lawsuitId}`;
+  async historico(lawsuitId, { status } = {}) {
+    if (status != null && !STATUS_HISTORICO.includes(status)) {
+      throw new CAMINHO_INEXISTENTE(
+        `historico(): status "${status}" não existe. Use ${STATUS_HISTORICO.join(', ')}; ` +
+        `a API ignora valor inválido e devolveria tudo.`
+      );
+    }
+    const contexto = `GET /history/${lawsuitId}${status ? `?status=${status}` : ''}`;
+    const qs = status ? `?status=${status}` : '';
     const { itens } = this._lista(
-      await this._req('GET', `/history/${encodeURIComponent(lawsuitId)}`),
+      await this._req('GET', `/history/${encodeURIComponent(lawsuitId)}${qs}`),
       contexto
     );
     if (itens.length < TETO_HISTORICO) {
@@ -322,6 +344,8 @@ class AdvboxClient {
    *
    * `faltando` soma o que faltou nas duas listas, então é um teto: o que faltou
    * numa pode ser o mesmo que faltou na outra.
+   *
+   * `de` e `ate` são obrigatórios, no formato AAAA-MM-DD: ver `janela()`.
    */
   async tarefas({ de, ate } = {}) {
     const [criadas, concluidas] = await Promise.all([
@@ -363,12 +387,26 @@ class AdvboxClient {
   }
 }
 
+/**
+ * Monta a janela de datas de `GET /posts`. As duas datas são obrigatórias.
+ *
+ * A doc avisa, e a medição confirma: mandar só uma data do par faz a API
+ * IGNORAR o filtro inteiro. Só `created_start` declarou 191 tarefas, o mesmo
+ * total de sem filtro nenhum; com o par, 66. E sem filtro a API não devolve "todas"
+ * como a doc diz: devolve só as que têm convidado pendente. Então janela
+ * incompleta aqui é erro, não um padrão silencioso.
+ */
 function janela(prefixo, de, ate) {
-  const p = new URLSearchParams();
-  if (de) p.set(`${prefixo}_start`, String(de).slice(0, 10));
-  if (ate) p.set(`${prefixo}_end`, String(ate).slice(0, 10));
-  const s = p.toString();
-  return s ? '?' + s : '';
+  const formato = /^\d{4}-\d{2}-\d{2}$/;
+  const d = de == null ? '' : String(de).slice(0, 10);
+  const a = ate == null ? '' : String(ate).slice(0, 10);
+  if (!formato.test(d) || !formato.test(a)) {
+    throw new CAMINHO_INEXISTENTE(
+      `Janela de tarefas exige { de, ate } no formato AAAA-MM-DD (recebi de=${JSON.stringify(de)}, ` +
+      `ate=${JSON.stringify(ate)}). Com uma data só, a API ignora o filtro e devolve outra coisa.`
+    );
+  }
+  return `?${prefixo}_start=${d}&${prefixo}_end=${a}`;
 }
 
 module.exports = { AdvboxClient, BASE, INTERVALO_MIN_MS };

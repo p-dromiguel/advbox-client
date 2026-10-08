@@ -250,6 +250,53 @@ test('histórico no teto, em modo estrito, lança sem inventar total', async () 
   });
 });
 
+test('janela de tarefas exige as duas datas: com uma só, a API ignora o filtro', async () => {
+  // Medido: só created_start declarou 191, o mesmo total de sem filtro nenhum; com o par, 66.
+  const { c, urls } = clientePorUrl(() => ({ data: [] }));
+  await assert.rejects(() => c.tarefasCriadas({ de: '2026-10-01' }), /exige \{ de, ate \}/);
+  await assert.rejects(() => c.tarefasConcluidas({ ate: '2026-10-08' }), /exige \{ de, ate \}/);
+  await assert.rejects(() => c.tarefas(), /exige \{ de, ate \}/);
+  await assert.rejects(() => c.tarefasCriadas({ de: '01/10/2026', ate: '08/10/2026' }), /AAAA-MM-DD/);
+  assert.equal(urls.length, 0, 'nenhuma chamada sai com janela incompleta');
+});
+
+test('janela aceita data com hora e corta no dia', async () => {
+  const { c, urls } = clientePorUrl(() => ({ data: [] }));
+  await c.tarefasCriadas({ de: '2026-10-01T00:00:00Z', ate: '2026-10-08' });
+  assert.match(urls[0], /\/posts\?created_start=2026-10-01&created_end=2026-10-08&limit=1000&offset=0$/);
+});
+
+test('últimos andamentos paginam (o padrão da rota é 100) e tiram repetição por lawsuit_id', async () => {
+  // O item de /last_movements não tem id: a chave é lawsuit_id.
+  const lote = (de, ate) => Array.from({ length: ate - de }, (_, i) => ({ lawsuit_id: de + i }));
+  const { c, urls } = clientePorUrl(url => offsetDe(url) === 0
+    ? { data: lote(0, 1000), totalCount: 1182 }
+    : { data: [{ lawsuit_id: 999 }, ...lote(1000, 1182)], totalCount: 1182 });
+
+  const r = await c.ultimosAndamentos();
+  assert.match(urls[0], /\/last_movements\?limit=1000&offset=0$/);
+  assert.equal(r.itens.length, 1182);
+  assert.equal(r.completa, true);
+});
+
+test('aniversariantes paginam', async () => {
+  const { c, urls } = clientePorUrl(() => ({ data: ids(0, 3), totalCount: 3 }));
+  const r = await c.aniversariantes();
+  assert.match(urls[0], /\/customers\/birthdays\?limit=1000&offset=0$/);
+  assert.equal(r.itens.length, 3);
+});
+
+test('histórico aceita o status documentado e recusa o resto', async () => {
+  // A API ignora status inválido em silêncio: status=xyz devolveu os mesmos 20 de sem filtro.
+  const { c, urls } = clientePorUrl(() => ({ data: ids(0, 16) }));
+  const r = await c.historico(13782346, { status: 'pending' });
+  assert.match(urls[0], /\/history\/13782346\?status=pending$/);
+  assert.equal(r.completa, true);
+  await assert.rejects(() => c.historico(1, { status: 'xyz' }), /status "xyz" não existe/);
+  await assert.rejects(() => c.historico(1, { status: 'open' }), /pending, completed, all/);
+  assert.equal(urls.length, 1);
+});
+
 test('401 avisa que pode ser rota inexistente, não só token', async () => {
   // Rota inexistente responde 401 "Unauthenticated.", igual a token inválido.
   const c = new AdvboxClient({

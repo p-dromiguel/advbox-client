@@ -35,7 +35,7 @@ async function main() {
   console.log(`  sem número, fora de rastreio: ${semNumero}\n`);
 
   // Uma chamada por processo. A versão em lote (`ultimosAndamentos`) seria mais
-  // barata, mas devolve `header` nulo — e sem `header` não dá para saber a origem.
+  // barata, mas não traz o campo `header`, e sem ele não dá para saber a origem.
   const amostra = rastreaveis.slice(0, 10);
   console.log(`Conferindo andamentos dos ${amostra.length} primeiros...\n`);
 

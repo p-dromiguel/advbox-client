@@ -27,8 +27,9 @@ test('sem o campo header → desconhecido, nunca "interno" por omissão', () => 
   assert.equal(origemDoAndamento(undefined), 'desconhecido');
 });
 
-test('o filtro por origem da API não separa; o header separa', () => {
-  // Os dois vieram na MESMA resposta de ?origin=TRIBUNAL — o filtro não filtrou.
+test('o header separa tribunal de interno, mesmo se o ?origin= deixar passar', () => {
+  // Em agosto de 2026, os dois vieram na MESMA resposta de ?origin=TRIBUNAL. Em outubro
+  // o filtro separava certo; a classificação pelo header não depende disso.
   const resposta = [
     { header: 'TJRJ', description: 'Conclusos para despacho' },
     { header: null, description: 'Cobrança gerada — 1ª parcela' },
@@ -39,13 +40,22 @@ test('o filtro por origem da API não separa; o header separa', () => {
 });
 
 test('origemEhDecidivel é falso quando todo header é nulo', () => {
-  // Formato de /last_movements: barata, em lote, e com header nulo em tudo.
+  // Header nulo em tudo: não dá para decidir a origem.
   const emLote = [{ header: null }, { header: null }, { header: null }];
   assert.equal(origemEhDecidivel(emLote), false);
 
   // Sem essa guarda, o filtro devolveria [] e alguém concluiria
   // "nenhum andamento do tribunal" a partir de um campo que a chamada não traz.
   assert.deepEqual(apenasDoTribunal(emLote), []);
+});
+
+test('origemEhDecidivel é falso quando o campo header nem vem (formato real de /last_movements)', () => {
+  // Medido em 08/10/2026: 182 itens, nenhum com a chave header. O exemplo da doc mostra o campo preenchido.
+  const emLote = [
+    { lawsuit_id: 1, date: '2026-10-01', title: 'Conclusos para despacho' },
+    { lawsuit_id: 2, date: '2026-09-30', title: 'Juntada de petição' },
+  ];
+  assert.equal(origemEhDecidivel(emLote), false);
 });
 
 test('origemEhDecidivel é verdadeiro se ao menos um header veio preenchido', () => {
